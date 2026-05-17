@@ -3,12 +3,10 @@
   "private": true,
   "sideEffects": false,
   "type": "module",
-"scripts": {
+  "scripts": {
     "dev": "vite dev",
-    "build": "vite build --base=/supabase-taskflow/",
-    "preview": "vite preview",
-    "predeploy": "npm run build",
-    "deploy": "gh-pages -d dist"
+    "build": "vite build",
+    "preview": "vite preview"
   },
   "dependencies": {
     "@cloudflare/vite-plugin": "^1.25.5",
