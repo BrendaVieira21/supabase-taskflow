@@ -1,252 +1,93 @@
+import { useEffect, useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
-import { CheckCircle2, ListTodo, Loader2, Plus, Search, Sparkles } from "lucide-react";
-import { toast } from "sonner";
-import { supabase } from "@/integrations/supabase/client";
-import type { Filter, Task } from "@/lib/tasks";
-import { TaskItem } from "@/components/TaskItem";
+import { fetchPagina } from "../utils/fetchPagina";
+import { parseContent } from "../utils/parseContent";
+import { ArrowRight, Star } from "lucide-react";
+import { Button } from "@/components/ui/button";
 
+// 1. Registrar a rota no TanStack Router (Isso remove o aviso e faz a página funcionar)
 export const Route = createFileRoute("/")({
-  head: () => ({
-    meta: [
-      { title: "Tarefas — To-Do moderno" },
-      { name: "description", content: "Lista de tarefas reativa com sincronização em tempo real." },
-    ],
-  }),
   component: Index,
 });
 
+interface ConteudoParseado {
+  titulos: Element[];
+  paragrafos: Element[];
+  imagens: Element[];
+  listas: Element[];
+}
+
 function Index() {
-  const [tasks, setTasks] = useState<Task[]>([]);
+  const [conteudo, setConteudo] = useState<ConteudoParseado | null>(null);
   const [loading, setLoading] = useState(true);
-  const [adding, setAdding] = useState(false);
-  const [draft, setDraft] = useState("");
-  const [search, setSearch] = useState("");
-  const [filter, setFilter] = useState<Filter>("all");
 
   useEffect(() => {
-    let mounted = true;
-    (async () => {
-      const { data, error } = await supabase
-        .from("tasks")
-        .select("*")
-        .order("created_at", { ascending: false });
-      if (!mounted) return;
-      if (error) toast.error("Erro ao carregar tarefas");
-      else setTasks(data ?? []);
-      setLoading(false);
-    })();
-
-    const channel = supabase
-      .channel("tasks-realtime")
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "tasks" },
-        (payload) => {
-          setTasks((prev) => {
-            if (payload.eventType === "INSERT") {
-              const next = payload.new as Task;
-              if (prev.some((t) => t.id === next.id)) return prev;
-              return [next, ...prev];
-            }
-            if (payload.eventType === "UPDATE") {
-              const next = payload.new as Task;
-              return prev.map((t) => (t.id === next.id ? next : t));
-            }
-            if (payload.eventType === "DELETE") {
-              const old = payload.old as Task;
-              return prev.filter((t) => t.id !== old.id);
-            }
-            return prev;
-          });
+    async function carregarDadosDoWordPress() {
+      try {
+        const dadosPagina = await fetchPagina("pagina-1");
+        
+        if (dadosPagina?.content?.rendered) {
+          const resultado = parseContent(dadosPagina.content.rendered);
+          setConteudo(resultado);
         }
-      )
-      .subscribe();
+      } catch (error) {
+        console.error("Erro ao carregar dados do WordPress:", error);
+      } finally {
+        setLoading(false);
+      }
+    }
 
-    return () => {
-      mounted = false;
-      supabase.removeChannel(channel);
-    };
+    carregarDadosDoWordPress();
   }, []);
 
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    return tasks.filter((t) => {
-      if (filter === "pending" && t.completed) return false;
-      if (filter === "completed" && !t.completed) return false;
-      if (q && !t.title.toLowerCase().includes(q)) return false;
-      return true;
-    });
-  }, [tasks, search, filter]);
-
-  const stats = useMemo(
-    () => ({
-      total: tasks.length,
-      pending: tasks.filter((t) => !t.completed).length,
-      completed: tasks.filter((t) => t.completed).length,
-    }),
-    [tasks]
-  );
-
-  const addTask = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const title = draft.trim();
-    if (!title) return;
-    setAdding(true);
-    const { error } = await supabase.from("tasks").insert({ title });
-    setAdding(false);
-    if (error) {
-      toast.error("Não foi possível adicionar");
-      return;
-    }
-    setDraft("");
-    toast.success("Tarefa adicionada");
-  };
-
-  const toggleTask = async (task: Task) => {
-    const prev = tasks;
-    setTasks((ts) => ts.map((t) => (t.id === task.id ? { ...t, completed: !t.completed } : t)));
-    const { error } = await supabase
-      .from("tasks")
-      .update({ completed: !task.completed })
-      .eq("id", task.id);
-    if (error) {
-      setTasks(prev);
-      toast.error("Erro ao atualizar");
-    }
-  };
-
-  const deleteTask = async (task: Task) => {
-    const prev = tasks;
-    setTasks((ts) => ts.filter((t) => t.id !== task.id));
-    const { error } = await supabase.from("tasks").delete().eq("id", task.id);
-    if (error) {
-      setTasks(prev);
-      toast.error("Erro ao excluir");
-    } else {
-      toast.success("Tarefa removida");
-    }
-  };
-
-  const editTask = async (task: Task, title: string) => {
-    const prev = tasks;
-    setTasks((ts) => ts.map((t) => (t.id === task.id ? { ...t, title } : t)));
-    const { error } = await supabase.from("tasks").update({ title }).eq("id", task.id);
-    if (error) {
-      setTasks(prev);
-      toast.error("Erro ao editar");
-    } else {
-      toast.success("Tarefa atualizada");
-    }
-  };
-
-  const filters: { key: Filter; label: string }[] = [
-    { key: "all", label: "Todas" },
-    { key: "pending", label: "Pendentes" },
-    { key: "completed", label: "Concluídas" },
-  ];
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-slate-900 flex items-center justify-center text-white font-sans">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-500 mx-auto mb-4"></div>
+          <p className="text-slate-400">A carregar conteúdo dinâmico...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <main className="min-h-screen bg-[image:var(--gradient-surface)] px-4 py-10 sm:py-16">
-      <div className="mx-auto w-full max-w-2xl">
-        <header className="mb-8 flex items-center gap-3">
-          <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-[image:var(--gradient-primary)] text-primary-foreground shadow-[var(--shadow-soft)]">
-            <Sparkles className="h-5 w-5" />
-          </div>
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight text-foreground">Minhas Tarefas</h1>
-            <p className="text-sm text-muted-foreground">
-              {stats.total} no total · {stats.pending} pendentes · {stats.completed} concluídas
-            </p>
-          </div>
-        </header>
-
-        <form
-          onSubmit={addTask}
-          className="mb-4 flex items-center gap-2 rounded-2xl border border-border bg-card p-2 shadow-[var(--shadow-soft)]"
-        >
-          <input
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            placeholder="O que precisa ser feito?"
-            className="flex-1 bg-transparent px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground outline-none"
-          />
-          <button
-            type="submit"
-            disabled={adding || !draft.trim()}
-            className="inline-flex items-center gap-1.5 rounded-xl bg-[image:var(--gradient-primary)] px-4 py-2 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
-          >
-            {adding ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
-            Adicionar
-          </button>
-        </form>
-
-        <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center">
-          <div className="relative flex-1">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Buscar tarefas..."
-              className="w-full rounded-xl border border-border bg-card py-2 pl-9 pr-3 text-sm outline-none ring-ring/40 focus:ring-2"
-            />
-          </div>
-          <div className="flex items-center gap-1 rounded-xl border border-border bg-card p-1">
-            {filters.map((f) => (
-              <button
-                key={f.key}
-                onClick={() => setFilter(f.key)}
-                className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
-                  filter === f.key
-                    ? "bg-[image:var(--gradient-primary)] text-primary-foreground"
-                    : "text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                {f.label}
-              </button>
-            ))}
-          </div>
+    <div className="min-h-screen bg-slate-900 text-white font-sans antialiased overflow-x-hidden">
+      {/* Hero Section */}
+      <section className="relative pt-32 pb-24 md:pt-40 md:pb-32 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="absolute inset-0 -z-10 flex items-center justify-center">
+          <div className="w-[600px] h-[600px] bg-indigo-500/10 rounded-full blur-3xl animate-pulse" />
+          <div className="w-[400px] h-[400px] bg-purple-500/10 rounded-full blur-3xl animate-pulse delay-75" />
         </div>
 
-        {loading ? (
-          <div className="flex items-center justify-center rounded-2xl border border-border bg-card py-16 text-muted-foreground">
-            <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-            Carregando...
+        <div className="text-center max-w-3xl mx-auto space-y-8">
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-slate-800/80 border border-slate-700/50 backdrop-blur-sm text-sm text-indigo-400">
+            <Star className="w-4 h-4 fill-current" />
+            <span>O gerenciador definitivo</span>
           </div>
-        ) : filtered.length === 0 ? (
-          <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-border bg-card/50 py-16 text-center">
-            {tasks.length === 0 ? (
-              <>
-                <ListTodo className="mb-3 h-10 w-10 text-muted-foreground" />
-                <p className="text-sm font-medium text-foreground">Nenhuma tarefa ainda</p>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Adicione sua primeira tarefa acima para começar.
-                </p>
-              </>
-            ) : (
-              <>
-                <CheckCircle2 className="mb-3 h-10 w-10 text-muted-foreground" />
-                <p className="text-sm font-medium text-foreground">Nada por aqui</p>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Tente ajustar o filtro ou a busca.
-                </p>
-              </>
-            )}
+
+          <h1 className="text-5xl md:text-7xl font-extrabold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-white via-slate-200 to-slate-400">
+            {conteudo?.titulos[0]?.textContent || "Eleve a sua"}{" "}
+            <span className="bg-clip-text text-transparent bg-gradient-to-r from-indigo-400 to-purple-400 block mt-2">
+              {conteudo?.titulos[1]?.textContent || "Produtividade"}
+            </span>
+          </h1>
+
+          <p className="text-lg md:text-xl text-slate-400 font-medium max-w-2xl mx-auto leading-relaxed">
+            {conteudo?.paragrafos[0]?.textContent || "Gerencie suas tarefas de forma simples, rápida e extremamente visual."}
+          </p>
+
+          <div className="flex flex-col sm:flex-row gap-4 justify-center items-center pt-4">
+            <Button size="lg" className="bg-indigo-600 hover:bg-indigo-500 text-white font-semibold shadow-lg shadow-indigo-600/20 px-8 py-6 rounded-xl transition-all duration-200 hover:-translate-y-0.5 group">
+              Começar Agora
+              <ArrowRight className="w-5 h-5 ml-2 group-hover:translate-x-1 transition-transform" />
+            </Button>
+            <Button size="lg" variant="outline" className="border-slate-700 hover:bg-slate-800 text-slate-300 font-semibold px-8 py-6 rounded-xl transition-all duration-200">
+              Ver Demonstração
+            </Button>
           </div>
-        ) : (
-          <ul className="space-y-2">
-            {filtered.map((task) => (
-              <TaskItem
-                key={task.id}
-                task={task}
-                onToggle={toggleTask}
-                onDelete={deleteTask}
-                onEdit={editTask}
-              />
-            ))}
-          </ul>
-        )}
-      </div>
-    </main>
+        </div>
+      </section>
+    </div>
   );
 }
